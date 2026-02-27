@@ -1,4 +1,4 @@
-from agents import Agent, ModelSettings
+from agents import Agent, ModelSettings, WebSearchTool
 
 from src.config import AZURE_DEPLOYMENT_NAME
 from src.tools import (
@@ -14,6 +14,7 @@ from src.tools import (
     read_source_code,
     run_command,
     search_in_file,
+    web_fetch,
     write_excel_cells,
     write_file,
 )
@@ -45,6 +46,8 @@ SYSTEM_PROMPT = """\
 12. **append_to_file**: 既存ファイルの末尾に内容を追記する（ログやレポートの蓄積に便利）
 13. **create_excel_sheet**: Excelファイルに新しいシートを追加する
 14. **export_excel_to_csv**: ExcelのシートをCSVファイルとしてエクスポートする
+15. **web_search**: （OpenAI組み込みツール）インターネットでWeb検索を行い、最新の情報を取得する
+16. **web_fetch**: 指定URLのWebページを取得してMarkdownに変換する（検索結果のURLを詳しく読む場合に使用）
 
 ## 作業の進め方
 
@@ -68,6 +71,14 @@ SYSTEM_PROMPT = """\
 - Excelのシート構成を把握するには read_excel_sheet_names を先に実行する
 - 修正前後のコード比較には diff_files を使う
 - ビルドやlintの実行には run_command を使う（許可されたコマンドのみ実行可能）
+
+## Web検索・ページ取得のコツ
+
+- 最新情報や外部データが必要な場合は web_search で検索してから回答する
+- 検索結果のURLを詳しく読みたい場合は web_fetch でページ内容を取得する
+- web_search → web_fetch の順に使うと効果的（検索で見つけたURLの詳細を取得）
+- web_fetch は HTML をMarkdownに変換するため、表やリストも読みやすく取得できる
+- 大きなページは自動的に切り詰められるので、必要な情報が含まれる部分に注目する
 
 ## 静的解析トリアージの知識
 
@@ -122,6 +133,8 @@ def create_agent() -> Agent:
             append_to_file,
             create_excel_sheet,
             export_excel_to_csv,
+            WebSearchTool(),
+            web_fetch,
         ],
         model_settings=ModelSettings(
             truncation="auto",

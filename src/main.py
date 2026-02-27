@@ -24,6 +24,8 @@ WELCOME_MESSAGE = """
     * ファイルのコピー・移動・比較
     * コマンド実行（ビルド、lint、静的解析ツール）
     * ExcelシートのCSVエクスポート
+    * Web検索（最新情報の検索・取得）
+    * Webページの取得・Markdown変換
     * 静的解析結果のトリアージ（誤検知/逸脱/修正の分類）
 
   入力例:
@@ -31,6 +33,8 @@ WELCOME_MESSAGE = """
     「C:\\project\\src にある .py ファイルを一覧表示して」
     「C:\\project\\src で 'TODO' を含む行を検索して」
     「分析結果をまとめたレポートを作成して」
+    「AIエージェントの最新トレンドを調べて」
+    「https://example.com のページ内容を取得して」
 
   コマンド:
     help  ... この案内を再表示
@@ -79,6 +83,12 @@ HELP_MESSAGE = """
     「python --version を実行して」
     「C:\\project で gcc -Wall main.c を実行して」
 
+  ■ Web検索・ページ取得
+    「Pythonの最新バージョンを調べて」
+    「Azure OpenAI Serviceの料金を検索して」
+    「https://example.com の内容を取得して要約して」
+    「さっき検索したURLの詳細を見せて」
+
   ■ 静的解析トリアージ
     「C:\\analysis\\findings.xlsx の静的解析結果を
      C:\\project\\src をベースにトリアージして」
@@ -106,6 +116,8 @@ TOOL_DISPLAY_NAMES: dict[str, str] = {
     "append_to_file": "ファイルに追記中",
     "create_excel_sheet": "シートを作成中",
     "export_excel_to_csv": "CSVにエクスポート中",
+    "web_search": "Webを検索中",
+    "web_fetch": "Webページを取得中",
 }
 
 
@@ -199,6 +211,10 @@ async def process_stream(result, status: LiveStatus) -> None:
                     display = TOOL_DISPLAY_NAMES.get(tool_name, f"ツール実行中: {tool_name}")
                     tool_call_count += 1
                     status.update(display)
+                # web_search_call の場合（ホステッドツール）
+                elif getattr(item, "type", None) == "web_search_call":
+                    tool_call_count += 1
+                    status.update(TOOL_DISPLAY_NAMES.get("web_search", "Webを検索中"))
 
             # ツール引数の構築完了 → 実行中表示
             elif isinstance(raw, ResponseFunctionCallArgumentsDoneEvent):

@@ -32,3 +32,7 @@ AZURE_APIM_SUBSCRIPTION_KEY: str = _require_env(
 AZURE_API_VERSION: str = os.environ.get("AZURE_API_VERSION", "2025-04-01-preview")
 AZURE_DEPLOYMENT_NAME: str = os.environ.get("AZURE_DEPLOYMENT_NAME", "gpt-4o")
 CLIENT_APPROACH: str = os.environ.get("CLIENT_APPROACH", "azure")
+
+# Web Fetch 設定
+WEB_FETCH_TIMEOUT: int = int(os.environ.get("WEB_FETCH_TIMEOUT", "30"))
+WEB_FETCH_MAX_SIZE: int = int(os.environ.get("WEB_FETCH_MAX_SIZE", "100000"))

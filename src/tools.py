@@ -7,8 +7,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import httpx
 import openpyxl
 from agents import function_tool
+from markdownify import markdownify as md
+
+from src.config import WEB_FETCH_MAX_SIZE, WEB_FETCH_TIMEOUT
 
 
 @function_tool
@@ -1088,5 +1092,125 @@ def export_excel_to_csv(
     except Exception as e:
         return json.dumps(
             {"error": f"CSVエクスポートに失敗しました: {e}"},
+            ensure_ascii=False,
+        )
+
+
+@function_tool
+async def web_fetch(
+    url: str,
+    timeout: int = 0,
+) -> str:
+    """指定したURLのWebページを取得し、Markdown形式に変換して返す。
+
+    Args:
+        url: 取得するWebページのURL（https:// または http:// で始まる完全なURL）。
+        timeout: リクエストのタイムアウト秒数。0の場合はデフォルト設定値を使用する。
+    """
+    try:
+        # URL バリデーション
+        if not url.startswith(("http://", "https://")):
+            return json.dumps(
+                {"error": "URLは http:// または https:// で始まる必要があります"},
+                ensure_ascii=False,
+            )
+
+        # タイムアウト設定
+        request_timeout = timeout if timeout > 0 else WEB_FETCH_TIMEOUT
+
+        # HTTP リクエスト
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=request_timeout,
+        ) as client:
+            response = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; APIMAssistant/1.0)",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "ja,en;q=0.9",
+                },
+            )
+            response.raise_for_status()
+
+        # Content-Type チェック
+        content_type = response.headers.get("content-type", "")
+
+        if "text/html" in content_type or "application/xhtml" in content_type:
+            # HTMLの場合: Markdownに変換
+            html_content = response.text
+            markdown_content = md(
+                html_content,
+                heading_style="ATX",
+                strip=["script", "style", "nav", "footer", "header"],
+            )
+        elif "text/plain" in content_type:
+            # プレーンテキストの場合: そのまま返す
+            markdown_content = response.text
+        elif "application/json" in content_type:
+            # JSONの場合: 整形して返す
+            try:
+                parsed = json.loads(response.text)
+                markdown_content = "```json\n" + json.dumps(
+                    parsed, ensure_ascii=False, indent=2
+                ) + "\n```"
+            except json.JSONDecodeError:
+                markdown_content = response.text
+        else:
+            return json.dumps(
+                {
+                    "error": f"サポートされていないContent-Typeです: {content_type}",
+                    "hint": "HTML、テキスト、JSONページのみ取得可能です",
+                },
+                ensure_ascii=False,
+            )
+
+        # 空白行の正規化（連続する空行を2行に）
+        markdown_content = re.sub(r"\n{3,}", "\n\n", markdown_content).strip()
+
+        # サイズ制限
+        truncated = False
+        if len(markdown_content) > WEB_FETCH_MAX_SIZE:
+            markdown_content = markdown_content[:WEB_FETCH_MAX_SIZE]
+            truncated = True
+
+        return json.dumps(
+            {
+                "url": str(response.url),
+                "status_code": response.status_code,
+                "content_type": content_type,
+                "content_length": len(markdown_content),
+                "truncated": truncated,
+                "content": markdown_content,
+            },
+            ensure_ascii=False,
+        )
+
+    except httpx.TimeoutException:
+        return json.dumps(
+            {"error": f"リクエストがタイムアウトしました（{request_timeout}秒）: {url}"},
+            ensure_ascii=False,
+        )
+    except httpx.HTTPStatusError as e:
+        return json.dumps(
+            {
+                "error": f"HTTPエラーが発生しました（ステータスコード: {e.response.status_code}）: {url}",
+                "status_code": e.response.status_code,
+            },
+            ensure_ascii=False,
+        )
+    except httpx.ConnectError:
+        return json.dumps(
+            {"error": f"接続できません。URLを確認してください: {url}"},
+            ensure_ascii=False,
+        )
+    except httpx.TooManyRedirects:
+        return json.dumps(
+            {"error": f"リダイレクトが多すぎます: {url}"},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return json.dumps(
+            {"error": f"Webページの取得に失敗しました: {e}"},
             ensure_ascii=False,
         )
