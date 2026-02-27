@@ -271,12 +271,14 @@ def write_excel_cells(
 def list_directory(
     directory_path: str,
     pattern: str = "*",
+    recursive: bool = False,
 ) -> str:
     """ディレクトリ内のファイルとサブディレクトリの一覧を返す。
 
     Args:
         directory_path: 一覧を取得するディレクトリの絶対パスまたは相対パス。
         pattern: ファイル名フィルタ（globパターン。例: '*.c', '*.py'）。
+        recursive: Trueの場合サブディレクトリも再帰的に検索する。パターン例: '*.py' で全階層の.pyファイルを検索できる。
     """
     try:
         p = Path(directory_path)
@@ -291,28 +293,39 @@ def list_directory(
                 ensure_ascii=False,
             )
 
-        entries = sorted(p.glob(pattern))
+        if recursive:
+            glob_pattern = f"**/{pattern}"
+        else:
+            glob_pattern = pattern
+
+        entries = sorted(p.glob(glob_pattern))
         dirs = []
         files = []
-        limit = 100
+        limit = 200
 
         for entry in entries:
             if len(dirs) + len(files) >= limit:
                 break
             if entry.is_dir():
-                dirs.append(entry.name + "/")
+                # 再帰時は相対パスを表示
+                rel = entry.relative_to(p)
+                dirs.append(str(rel) + "/")
             elif entry.is_file():
-                files.append(entry.name)
+                rel = entry.relative_to(p)
+                files.append(str(rel))
 
         total = len(dirs) + len(files)
+        total_found = len(entries)
         return json.dumps(
             {
                 "directory": str(p.resolve()),
                 "pattern": pattern,
+                "recursive": recursive,
                 "directories": dirs,
                 "files": files,
                 "total_entries": total,
-                "truncated": len(entries) > limit,
+                "truncated": total_found > limit,
+                "truncated_note": f"表示は{limit}件までです（全{total_found}件）" if total_found > limit else None,
             },
             ensure_ascii=False,
         )
@@ -325,5 +338,53 @@ def list_directory(
     except Exception as e:
         return json.dumps(
             {"error": f"ディレクトリの一覧取得に失敗しました: {e}"},
+            ensure_ascii=False,
+        )
+
+
+@function_tool
+def write_file(
+    file_path: str,
+    content: str,
+    encoding: str = "utf-8",
+) -> str:
+    """テキストファイルを新規作成または上書き保存する。
+
+    Args:
+        file_path: 保存先ファイルの絶対パスまたは相対パス。
+        content: ファイルに書き込む内容。
+        encoding: 文字エンコーディング。デフォルトは 'utf-8'。日本語Windowsでは 'shift_jis' や 'cp932' も指定可能。
+    """
+    try:
+        p = Path(file_path)
+
+        # 親ディレクトリが存在しない場合は作成
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        p.write_text(content, encoding=encoding)
+
+        return json.dumps(
+            {
+                "status": "success",
+                "file": str(p.resolve()),
+                "size_bytes": p.stat().st_size,
+                "encoding": encoding,
+            },
+            ensure_ascii=False,
+        )
+
+    except PermissionError:
+        return json.dumps(
+            {"error": f"ファイルの書き込み権限がありません: {file_path}"},
+            ensure_ascii=False,
+        )
+    except LookupError:
+        return json.dumps(
+            {"error": f"不明なエンコーディングです: {encoding}（utf-8, shift_jis, cp932 などを指定してください）"},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return json.dumps(
+            {"error": f"ファイルの書き込みに失敗しました: {e}"},
             ensure_ascii=False,
         )

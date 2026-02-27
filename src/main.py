@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import threading
 
 from agents import Runner, RunConfig, set_default_openai_client, set_tracing_disabled
 
@@ -8,25 +9,73 @@ from src.client import create_client
 
 WELCOME_MESSAGE = """
 ================================================================
-  Azure APIM アシスタント
+  APIM アシスタントへようこそ!
 ================================================================
 
   ファイル操作・Excel操作を中心とした汎用AIアシスタントです。
+  何でもお気軽にご質問ください。
 
-  主な機能:
-    - Excelファイルの読み込み・書き込み
-    - ソースコード / テキストファイルの読み込み
-    - ディレクトリ内容の一覧取得
-    - 静的解析結果のトリアージ（誤検知/逸脱/修正の分類）
+  できること:
+    * Excelファイルの読み込み・書き込み・分析
+    * ソースコードやテキストファイルの閲覧
+    * フォルダ内のファイル一覧・検索
+    * テキストファイルの作成・保存
+    * 静的解析結果のトリアージ（誤検知/逸脱/修正の分類）
 
   入力例:
     「C:\\results.xlsx を読み込んで内容を教えて」
-    「C:\\project\\src を基準にして analysis.xlsx の
-     静的解析結果をトリアージして」
+    「C:\\project\\src にある .py ファイルを一覧表示して」
+    「分析結果をまとめたレポートを作成して」
 
-  終了するには quit と入力してください
+  コマンド:
+    help  ... この案内を再表示
+    quit  ... 終了（exit, q でも可）
+
 ================================================================
 """
+
+HELP_MESSAGE = """
+================================================================
+  ヘルプ - 使い方ガイド
+================================================================
+
+  ■ Excelの操作
+    「C:\\data.xlsx を読み込んで内容を見せて」
+    「C:\\data.xlsx のA列を集計して」
+    「C:\\output.xlsx の "結果" 列に値を書き込んで」
+
+  ■ ファイルの閲覧
+    「C:\\project\\main.py を読んで」
+    「C:\\project\\main.py の100行目から150行目を見せて」
+
+  ■ ファイルの作成・保存
+    「分析結果をまとめて C:\\report.txt に保存して」
+    「以下の内容でファイルを作成して」
+
+  ■ フォルダの一覧
+    「C:\\project\\src の中身を見せて」
+    「C:\\project\\src にある .py ファイルを探して」
+    「C:\\project 以下の全 .c ファイルを再帰的に探して」
+
+  ■ 静的解析トリアージ
+    「C:\\analysis\\findings.xlsx の静的解析結果を
+     C:\\project\\src をベースにトリアージして」
+
+  コマンド:
+    help  ... この案内を表示
+    quit  ... 終了（exit, q でも可）
+
+================================================================
+"""
+
+# ツール名 → 日本語表示名のマッピング
+TOOL_DISPLAY_NAMES: dict[str, str] = {
+    "read_excel": "Excelファイルを読み込み中",
+    "read_source_code": "ソースコードを読み込み中",
+    "write_excel_cells": "Excelファイルに書き込み中",
+    "write_file": "ファイルを保存中",
+    "list_directory": "フォルダを探索中",
+}
 
 
 def setup() -> None:
@@ -36,19 +85,128 @@ def setup() -> None:
     set_default_openai_client(client)
 
 
+class LiveStatus:
+    """処理の進捗をリアルタイムでスピナー付きで表示する。
+
+    update() でメッセージを変更でき、Claude Code のように
+    「今何をしているか」をユーザーにリアルタイムで伝える。
+    """
+
+    def __init__(self, message: str = "考え中..."):
+        self._message = message
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._max_line_len = 0
+
+    def start(self) -> None:
+        self._stop_event.clear()
+        self._max_line_len = 0
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def update(self, message: str) -> None:
+        """スピナーのメッセージを更新する。"""
+        with self._lock:
+            self._message = message
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join()
+        # スピナー行をクリア
+        clear_len = max(self._max_line_len + 4, 80)
+        print(f"\r{' ' * clear_len}\r", end="", flush=True)
+
+    def _spin(self) -> None:
+        chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        idx = 0
+        while not self._stop_event.is_set():
+            with self._lock:
+                msg = self._message
+            line = f"\r{chars[idx]} {msg}"
+            self._max_line_len = max(self._max_line_len, len(line))
+            # 前回より短い場合に残る文字を消すためパディング
+            padded = line.ljust(self._max_line_len)
+            print(padded, end="", flush=True)
+            idx = (idx + 1) % len(chars)
+            self._stop_event.wait(0.1)
+
+
+async def process_stream(result, status: LiveStatus) -> None:
+    """ストリーミングイベントを処理し、LiveStatus をリアルタイム更新する。"""
+    try:
+        from openai.types.responses import (
+            ResponseOutputItemAddedEvent,
+            ResponseTextDeltaEvent,
+            ResponseReasoningTextDeltaEvent,
+            ResponseFunctionCallArgumentsDoneEvent,
+        )
+    except ImportError:
+        pass
+
+    tool_call_count = 0
+
+    async for event in result.stream_events():
+        if event.type == "raw_response_event":
+            raw = event.data
+
+            # テキスト生成中
+            if isinstance(raw, ResponseTextDeltaEvent):
+                status.update("回答を生成中...")
+
+            # 推論・思考中
+            elif isinstance(raw, ResponseReasoningTextDeltaEvent):
+                status.update("考え中...")
+
+            # ツール呼び出しの開始検出
+            elif isinstance(raw, ResponseOutputItemAddedEvent):
+                item = raw.item
+                # function_call の場合、name からツール名を取得
+                if getattr(item, "type", None) == "function_call":
+                    tool_name = getattr(item, "name", "")
+                    display = TOOL_DISPLAY_NAMES.get(tool_name, f"ツール実行中: {tool_name}")
+                    tool_call_count += 1
+                    status.update(display)
+
+            # ツール引数の構築完了 → 実行中表示
+            elif isinstance(raw, ResponseFunctionCallArgumentsDoneEvent):
+                status.update("ツールを実行中...")
+
+        elif event.type == "run_item_stream_event":
+            # ツール出力が返ってきた → 次の処理へ
+            if event.name == "tool_output":
+                status.update("結果を分析中...")
+            elif event.name == "tool_called":
+                # RunItemStreamEvent の tool_called でもツール名を取得
+                raw_item = getattr(event.item, "raw_item", None)
+                if raw_item:
+                    tool_name = getattr(raw_item, "name", "")
+                    display = TOOL_DISPLAY_NAMES.get(tool_name, f"ツール実行中: {tool_name}")
+                    status.update(display)
+
+
 async def run_single(user_input: str) -> str:
     """1回のメッセージでエージェントを実行し、結果を返す。"""
     agent = create_agent()
-    result = await Runner.run(
-        agent,
-        input=user_input,
-        max_turns=200,
-        run_config=RunConfig(
-            tracing_disabled=True,
-            workflow_name="azure-apim-agent",
-        ),
-    )
-    return result.final_output
+    status = LiveStatus()
+    status.start()
+    try:
+        result = Runner.run_streamed(
+            agent,
+            input=user_input,
+            max_turns=200,
+            run_config=RunConfig(
+                tracing_disabled=True,
+                workflow_name="azure-apim-agent",
+            ),
+        )
+        await process_stream(result, status)
+        status.stop()
+        return result.final_output
+    except Exception:
+        status.stop()
+        raise
 
 
 async def run_interactive() -> None:
@@ -62,13 +220,22 @@ async def run_interactive() -> None:
         try:
             user_input = input("\nあなた: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n\nお疲れ様でした。")
+            print("\n\nお疲れ様でした。またいつでもどうぞ!")
             break
 
-        if not user_input or user_input.lower() in ("quit", "exit", "q"):
-            print("お疲れ様でした。")
+        if not user_input:
+            continue
+
+        lower_input = user_input.lower()
+        if lower_input in ("quit", "exit", "q"):
+            print("お疲れ様でした。またいつでもどうぞ!")
             break
 
+        if lower_input in ("help", "?", "ヘルプ"):
+            print(HELP_MESSAGE)
+            continue
+
+        status = LiveStatus()
         try:
             if input_items:
                 input_items.append({"role": "user", "content": user_input})
@@ -76,7 +243,8 @@ async def run_interactive() -> None:
             else:
                 run_input = user_input
 
-            result = await Runner.run(
+            status.start()
+            result = Runner.run_streamed(
                 agent,
                 input=run_input,
                 max_turns=200,
@@ -85,13 +253,30 @@ async def run_interactive() -> None:
                     workflow_name="azure-apim-agent",
                 ),
             )
+            await process_stream(result, status)
+            status.stop()
             print(f"\nアシスタント: {result.final_output}")
 
             input_items = result.to_input_list()
 
+        except KeyboardInterrupt:
+            status.stop()
+            print("\n\n処理を中断しました。新しいメッセージを入力できます。")
         except Exception as e:
-            print(f"\nエラーが発生しました: {type(e).__name__}: {e}")
-            print("もう一度お試しください。問題が続く場合は入力内容を確認してください。")
+            status.stop()
+            error_name = type(e).__name__
+            print(f"\nエラーが発生しました: {error_name}: {e}")
+
+            if "auth" in str(e).lower() or "401" in str(e) or "403" in str(e):
+                print("→ 認証エラーの可能性があります。.env の AZURE_APIM_SUBSCRIPTION_KEY を確認してください。")
+            elif "timeout" in str(e).lower() or "timed out" in str(e).lower():
+                print("→ 接続がタイムアウトしました。ネットワーク接続を確認してください。")
+            elif "connection" in str(e).lower():
+                print("→ サーバーに接続できません。AZURE_APIM_ENDPOINT の設定とネットワーク接続を確認してください。")
+            elif "rate" in str(e).lower() or "429" in str(e):
+                print("→ APIのレート制限に達しました。しばらく待ってから再試行してください。")
+            else:
+                print("→ もう一度お試しください。問題が続く場合は .env の設定を確認してください。")
 
 
 def main() -> None:
