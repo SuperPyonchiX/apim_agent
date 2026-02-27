@@ -1,7 +1,22 @@
 from agents import Agent, ModelSettings
 
 from src.config import AZURE_DEPLOYMENT_NAME
-from src.tools import list_directory, read_excel, read_source_code, write_excel_cells, write_file
+from src.tools import (
+    append_to_file,
+    copy_file,
+    create_excel_sheet,
+    diff_files,
+    export_excel_to_csv,
+    get_file_info,
+    list_directory,
+    read_excel,
+    read_excel_sheet_names,
+    read_source_code,
+    run_command,
+    search_in_file,
+    write_excel_cells,
+    write_file,
+)
 
 SYSTEM_PROMPT = """\
 あなたは親切で分かりやすい日本語AIアシスタント「APIMアシスタント」です。
@@ -21,6 +36,15 @@ SYSTEM_PROMPT = """\
 3. **write_excel_cells**: Excelファイルの指定セルに値を書き込む（列の自動追加にも対応）
 4. **write_file**: テキストファイルを新規作成・上書き保存する（レポート作成やコード生成に便利）
 5. **list_directory**: フォルダの中身を一覧表示する（パターン指定やサブフォルダ再帰検索にも対応）
+6. **search_in_file**: ファイルやディレクトリ内でテキスト検索する（正規表現対応、grep的機能）
+7. **get_file_info**: ファイルのサイズ・更新日時・エンコーディングなどのメタデータを取得する
+8. **read_excel_sheet_names**: Excelファイルに含まれる全シート名の一覧を取得する
+9. **copy_file**: ファイルやディレクトリをコピーまたは移動する
+10. **run_command**: 許可されたコマンドを安全に実行する（ビルド、lint、静的解析ツール等）
+11. **diff_files**: 2つのファイルの差分を比較する（unified diff形式）
+12. **append_to_file**: 既存ファイルの末尾に内容を追記する（ログやレポートの蓄積に便利）
+13. **create_excel_sheet**: Excelファイルに新しいシートを追加する
+14. **export_excel_to_csv**: ExcelのシートをCSVファイルとしてエクスポートする
 
 ## 作業の進め方
 
@@ -36,6 +60,14 @@ SYSTEM_PROMPT = """\
 - 50行を超えるデータは start_row パラメータで分割して読む
 - 書き込みは write_excel_cells で列名を指定してバッチ更新する
 - Excelが他のソフトで開かれているとエラーになるので、その場合はユーザーに閉じるよう案内する
+
+## ファイル検索・比較のコツ
+
+- 関数名や変数名を探すときは search_in_file を使う（正規表現も利用可能）
+- 大きなファイルを読む前に get_file_info でサイズを確認する
+- Excelのシート構成を把握するには read_excel_sheet_names を先に実行する
+- 修正前後のコード比較には diff_files を使う
+- ビルドやlintの実行には run_command を使う（許可されたコマンドのみ実行可能）
 
 ## 静的解析トリアージの知識
 
@@ -75,7 +107,22 @@ def create_agent() -> Agent:
         name="Azure APIM アシスタント",
         instructions=SYSTEM_PROMPT,
         model=AZURE_DEPLOYMENT_NAME,
-        tools=[read_excel, read_source_code, write_excel_cells, write_file, list_directory],
+        tools=[
+            read_excel,
+            read_source_code,
+            write_excel_cells,
+            write_file,
+            list_directory,
+            search_in_file,
+            get_file_info,
+            read_excel_sheet_names,
+            copy_file,
+            run_command,
+            diff_files,
+            append_to_file,
+            create_excel_sheet,
+            export_excel_to_csv,
+        ],
         model_settings=ModelSettings(
             truncation="auto",
             parallel_tool_calls=True,

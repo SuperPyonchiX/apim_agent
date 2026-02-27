@@ -18,13 +18,18 @@ WELCOME_MESSAGE = """
   できること:
     * Excelファイルの読み込み・書き込み・分析
     * ソースコードやテキストファイルの閲覧
+    * ファイル・ディレクトリ内のテキスト検索（grep的機能）
     * フォルダ内のファイル一覧・検索
-    * テキストファイルの作成・保存
+    * テキストファイルの作成・保存・追記
+    * ファイルのコピー・移動・比較
+    * コマンド実行（ビルド、lint、静的解析ツール）
+    * ExcelシートのCSVエクスポート
     * 静的解析結果のトリアージ（誤検知/逸脱/修正の分類）
 
   入力例:
     「C:\\results.xlsx を読み込んで内容を教えて」
     「C:\\project\\src にある .py ファイルを一覧表示して」
+    「C:\\project\\src で 'TODO' を含む行を検索して」
     「分析結果をまとめたレポートを作成して」
 
   コマンド:
@@ -43,19 +48,36 @@ HELP_MESSAGE = """
     「C:\\data.xlsx を読み込んで内容を見せて」
     「C:\\data.xlsx のA列を集計して」
     「C:\\output.xlsx の "結果" 列に値を書き込んで」
+    「C:\\data.xlsx のシート一覧を見せて」
+    「C:\\data.xlsx をCSVにエクスポートして」
+    「C:\\data.xlsx に "集計" シートを追加して」
 
   ■ ファイルの閲覧
     「C:\\project\\main.py を読んで」
     「C:\\project\\main.py の100行目から150行目を見せて」
+    「C:\\project\\main.py のファイル情報を教えて」
+
+  ■ テキスト検索
+    「C:\\project\\src で 'TODO' を含む行を検索して」
+    「C:\\project\\src の .py ファイルから 'def main' を再帰検索して」
 
   ■ ファイルの作成・保存
     「分析結果をまとめて C:\\report.txt に保存して」
     「以下の内容でファイルを作成して」
+    「C:\\log.txt にログを追記して」
+
+  ■ ファイルのコピー・移動・比較
+    「C:\\data.xlsx を C:\\backup\\data.xlsx にコピーして」
+    「C:\\old.py と C:\\new.py の差分を見せて」
 
   ■ フォルダの一覧
     「C:\\project\\src の中身を見せて」
     「C:\\project\\src にある .py ファイルを探して」
     「C:\\project 以下の全 .c ファイルを再帰的に探して」
+
+  ■ コマンド実行
+    「python --version を実行して」
+    「C:\\project で gcc -Wall main.c を実行して」
 
   ■ 静的解析トリアージ
     「C:\\analysis\\findings.xlsx の静的解析結果を
@@ -75,6 +97,15 @@ TOOL_DISPLAY_NAMES: dict[str, str] = {
     "write_excel_cells": "Excelファイルに書き込み中",
     "write_file": "ファイルを保存中",
     "list_directory": "フォルダを探索中",
+    "search_in_file": "テキストを検索中",
+    "get_file_info": "ファイル情報を取得中",
+    "read_excel_sheet_names": "シート一覧を取得中",
+    "copy_file": "ファイルをコピー/移動中",
+    "run_command": "コマンドを実行中",
+    "diff_files": "ファイルを比較中",
+    "append_to_file": "ファイルに追記中",
+    "create_excel_sheet": "シートを作成中",
+    "export_excel_to_csv": "CSVにエクスポート中",
 }
 
 
